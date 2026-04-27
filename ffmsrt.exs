@@ -18,14 +18,14 @@ Application.put_env(:exla, :clients,
 defmodule Main do
   @moduledoc false
 
-  # @model_name "openai/whisper-tiny"
-  @model_name "openai/whisper-large-v3-turbo"
+  # @model_speech2text "openai/whisper-tiny"
+  @model_speech2text "openai/whisper-large-v3-turbo"
   @debug_chunk true
 
   defp doc,
     do: """
     Synopsis:
-    Convert a movie file into a srt file (subtitle) using the local llm: #{@model_name}.
+    Convert a movie file into a srt file (subtitle) using the local speech2text: #{@model_speech2text}.
     Usage:
     $ ffmsrt.exs # help
     $ ffmsrt.exs /tmp/english_spoken_video.mp4
@@ -45,7 +45,7 @@ defmodule Main do
     end
 
     Nx.global_default_backend({EXLA.Backend, client: :cuda})
-    model_name = @model_name
+    model_name = @model_speech2text
     {:ok, model} = Bumblebee.load_model({:hf, model_name}, backend: EXLA.Backend)
     {:ok, featurizer} = Bumblebee.load_featurizer({:hf, model_name})
     {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, model_name})
@@ -68,7 +68,7 @@ defmodule Main do
     |> Stream.into(File.stream!(audio_path <> ".srt"))
     |> Stream.run()
 
-    IO.puts("srt file #{audio_path <> ".srt"} created.")
+    IO.puts("\nsrt file #{audio_path <> ".srt"} created.")
   end
 
   def main(_), do: IO.puts(doc())
@@ -85,17 +85,26 @@ defmodule Main do
        ) do
     sec_dur = fend - start
 
-    if sec_dur > 0 and sec_dur < 20 do
-      srt_element(id, start, fend, text)
-    else
-      invalid_chunk_time(sec_dur, chk, id)
-      ""
+    cond do
+      sec_dur < 0 or sec_dur > 20 ->
+        invalid_chunk_time(sec_dur, chk, id)
+        ""
+
+      sec_dur > 1 ->
+        srt_element(id, start, fend, text)
+
+      true ->
+        srt_element(id, start, heuristic_subtitle_end(start, text), text)
     end
   end
 
   defp build_srt(chunk, id) do
     perrors("** chunk error #1 (#{id}), #{inspect(chunk)}")
     ""
+  end
+
+  defp heuristic_subtitle_end(start, txt) do
+    start + String.length(txt) / 20
   end
 
   defp invalid_chunk_time(dur, chk, id) when dur > 0 do
